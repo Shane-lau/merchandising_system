@@ -118,6 +118,29 @@ function createBranchesTable(next) {
   })
 }
 
+function createUsersTable(next) {
+  const sql = `
+    CREATE TABLE IF NOT EXISTS users (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      full_name VARCHAR(150) NOT NULL,
+      email VARCHAR(150) NOT NULL UNIQUE,
+      password VARCHAR(255) NOT NULL,
+      role ENUM('super_admin', 'admin_hr', 'branch_staff') NOT NULL DEFAULT 'branch_staff',
+      branch_id INT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  `
+
+  db.query(sql, (error) => {
+    if (error) {
+      console.error('Error ensuring users table:', error.message)
+      process.exit(1)
+    }
+
+    next()
+  })
+}
+
 function createProductsTable(next) {
   const sql = `
     CREATE TABLE IF NOT EXISTS products (
@@ -175,9 +198,11 @@ function ensureUsersBranchColumn(next) {
 }
 
 function ensureDatabaseFoundation(next) {
-  createBranchesTable(() => {
-    createProductsTable(() => {
-      ensureUsersBranchColumn(next)
+  createUsersTable(() => {
+    createBranchesTable(() => {
+      createProductsTable(() => {
+        ensureUsersBranchColumn(next)
+      })
     })
   })
 }
