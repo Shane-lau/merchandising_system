@@ -13,11 +13,16 @@ const JWT_SECRET = process.env.JWT_SECRET
 app.use(cors())
 app.use(express.json())
 
+// Replace lines 15–20 in your server.js with this:
 const db = mysql.createConnection({
   host: process.env.DB_HOST,
+  port: Number(process.env.DB_PORT) || 3306,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
+  ssl: {
+    rejectUnauthorized: false
+  }
 })
 
 const allowedUserRoles = ['admin_hr', 'branch_staff']
