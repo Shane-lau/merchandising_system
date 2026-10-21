@@ -7,7 +7,7 @@ const emptyMovement = { branch_id: '', product_id: '', quantity: '', reference_n
 
 function Inventory() {
   const { user } = useAuth()
-  const canChooseBranch = user.role !== 'branch_staff'
+  const canChooseBranch = user.role === 'super_admin'
   const [inventory, setInventory] = useState([])
   const [movements, setMovements] = useState([])
   const [branches, setBranches] = useState([])

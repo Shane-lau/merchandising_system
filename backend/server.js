@@ -43,7 +43,7 @@ function isNonNegativeInteger(value) {
 }
 
 function getAuthorizedBranchId(req, requestedBranchId) {
-  if (req.user.role !== 'branch_staff') {
+  if (req.user.role === 'super_admin') {
     return isPositiveInteger(requestedBranchId) ? Number(requestedBranchId) : null
   }
 
@@ -116,15 +116,16 @@ function authenticateToken(req, res, next) {
       return res.status(401).json({ message: 'Invalid or expired token.' })
     }
 
-    req.user = {
-      id: decodedUser.user_id,
-      user_id: decodedUser.user_id,
-      full_name: decodedUser.full_name,
-      email: decodedUser.email,
-      role: decodedUser.role,
-      branch_id: decodedUser.branch_id || null,
-    }
-    next()
+    db.query(
+      'SELECT id, full_name, email, role, branch_id FROM users WHERE id = ? LIMIT 1',
+      [decodedUser.user_id],
+      (userError, users) => {
+        if (userError) return res.status(500).json({ message: 'Database error while authenticating user.' })
+        if (!users.length) return res.status(401).json({ message: 'User account no longer exists.' })
+        req.user = { ...users[0], user_id: users[0].id, branch_id: users[0].branch_id || null }
+        next()
+      },
+    )
   })
 }
 
@@ -525,15 +526,21 @@ app.get('/api/profile', authenticateToken, (req, res) => {
   })
 })
 
-app.get('/api/users', authenticateToken, authorizeRoles('super_admin'), (req, res) => {
+app.get('/api/users', authenticateToken, authorizeRoles('super_admin', 'admin_hr'), (req, res) => {
+  const branchFilter = req.user.role === 'admin_hr' ? 'WHERE users.branch_id = ? AND users.role = \'branch_staff\'' : ''
+  const params = req.user.role === 'admin_hr' ? [req.user.branch_id] : []
+  if (req.user.role === 'admin_hr' && !isPositiveInteger(req.user.branch_id)) {
+    return res.status(403).json({ message: 'Your account has not been assigned to a branch. Please contact the CEO/Super Admin.' })
+  }
   const sql = `
     SELECT users.id, users.full_name, users.email, users.role, users.branch_id, branches.branch_name, users.created_at
     FROM users
     LEFT JOIN branches ON users.branch_id = branches.id
+    ${branchFilter}
     ORDER BY users.created_at DESC
   `
 
-  db.query(sql, (error, users) => {
+  db.query(sql, params, (error, users) => {
     if (error) {
       return res.status(500).json({ message: 'Database error while loading users.' })
     }
@@ -542,7 +549,7 @@ app.get('/api/users', authenticateToken, authorizeRoles('super_admin'), (req, re
   })
 })
 
-app.post('/api/users', authenticateToken, authorizeRoles('super_admin'), (req, res) => {
+app.post('/api/users', authenticateToken, authorizeRoles('super_admin', 'admin_hr'), (req, res) => {
   const { full_name, email, password, role, branch_id } = req.body
   const cleanedName = full_name ? full_name.trim() : ''
   const cleanedEmail = email ? email.trim().toLowerCase() : ''
@@ -563,10 +570,14 @@ app.post('/api/users', authenticateToken, authorizeRoles('super_admin'), (req, r
     return res.status(400).json({ message: 'Role must be Admin / HR or Branch Staff.' })
   }
 
-  const cleanedBranchId = role === 'branch_staff' ? branch_id : null
+  if (req.user.role === 'admin_hr' && role !== 'branch_staff') {
+    return res.status(403).json({ message: 'Admin/HR can create Branch Staff accounts only.' })
+  }
 
-  if (role === 'branch_staff' && !isPositiveInteger(cleanedBranchId)) {
-    return res.status(400).json({ message: 'Branch Staff accounts must be assigned to a branch.' })
+  const cleanedBranchId = req.user.role === 'admin_hr' ? req.user.branch_id : branch_id
+
+  if (!isPositiveInteger(cleanedBranchId)) {
+    return res.status(400).json({ message: 'Admin/HR and Branch Staff accounts must be assigned to an active branch.' })
   }
 
   db.query('SELECT id FROM users WHERE email = ? LIMIT 1', [cleanedEmail], (selectError, existingUsers) => {
@@ -607,14 +618,14 @@ app.post('/api/users', authenticateToken, authorizeRoles('super_admin'), (req, r
       })
     }
 
-    if (role === 'branch_staff') {
-      db.query('SELECT id FROM branches WHERE id = ? LIMIT 1', [cleanedBranchId], (branchError, branches) => {
+    if (role === 'branch_staff' || role === 'admin_hr') {
+      db.query('SELECT id FROM branches WHERE id = ? AND status = ? LIMIT 1', [cleanedBranchId, 'active'], (branchError, branches) => {
         if (branchError) {
           return res.status(500).json({ message: 'Database error while checking branch.' })
         }
 
         if (branches.length === 0) {
-          return res.status(400).json({ message: 'Selected branch does not exist.' })
+          return res.status(400).json({ message: 'Selected branch does not exist or is inactive.' })
         }
 
         createUser()
@@ -626,7 +637,52 @@ app.post('/api/users', authenticateToken, authorizeRoles('super_admin'), (req, r
   })
 })
 
-app.get('/api/branches', authenticateToken, authorizeRoles('super_admin', 'admin_hr'), (req, res) => {
+app.patch('/api/users/:id', authenticateToken, authorizeRoles('super_admin', 'admin_hr'), (req, res) => {
+  if (!isPositiveInteger(req.params.id)) return res.status(400).json({ message: 'Invalid user ID.' })
+  const { full_name, branch_id } = req.body
+  db.query('SELECT id, role, branch_id FROM users WHERE id = ? LIMIT 1', [req.params.id], (findError, users) => {
+    if (findError) return res.status(500).json({ message: 'Database error while loading user.' })
+    if (!users.length) return res.status(404).json({ message: 'User not found.' })
+    const target = users[0]
+    if (target.role === 'super_admin') return res.status(403).json({ message: 'The Super Admin account cannot be modified here.' })
+    if (req.user.role === 'admin_hr' && (target.role !== 'branch_staff' || Number(target.branch_id) !== Number(req.user.branch_id))) {
+      return res.status(403).json({ message: 'You can update Branch Staff assigned to your branch only.' })
+    }
+    const nextBranchId = req.user.role === 'admin_hr' ? req.user.branch_id : branch_id
+    if (nextBranchId !== undefined && !isPositiveInteger(nextBranchId)) return res.status(400).json({ message: 'A valid branch assignment is required.' })
+    function saveUpdate() {
+      const fields = []
+      const params = []
+      if (full_name?.trim()) { fields.push('full_name = ?'); params.push(full_name.trim()) }
+      if (nextBranchId !== undefined) { fields.push('branch_id = ?'); params.push(nextBranchId) }
+      if (!fields.length) return res.status(400).json({ message: 'Provide a name or branch assignment to update.' })
+      params.push(req.params.id)
+      db.query(`UPDATE users SET ${fields.join(', ')} WHERE id = ?`, params, (updateError) => {
+        if (updateError) return res.status(500).json({ message: 'Database error while updating user.' })
+        res.json({ message: 'User updated successfully.' })
+      })
+    }
+    if (nextBranchId === undefined) return saveUpdate()
+    db.query('SELECT id FROM branches WHERE id = ? AND status = ? LIMIT 1', [nextBranchId, 'active'], (branchError, branches) => {
+      if (branchError) return res.status(500).json({ message: 'Database error while checking branch.' })
+      if (!branches.length) return res.status(400).json({ message: 'Selected branch does not exist or is inactive.' })
+      saveUpdate()
+    })
+  })
+})
+
+app.get('/api/my-branch', authenticateToken, authorizeRoles('admin_hr', 'branch_staff'), (req, res) => {
+  if (!isPositiveInteger(req.user.branch_id)) {
+    return res.status(403).json({ message: 'Your account has not been assigned to a branch. Please contact the CEO/Super Admin.' })
+  }
+  db.query('SELECT id, branch_name, branch_code, location, status, created_at FROM branches WHERE id = ? LIMIT 1', [req.user.branch_id], (error, branches) => {
+    if (error) return res.status(500).json({ message: 'Database error while loading your branch.' })
+    if (!branches.length) return res.status(404).json({ message: 'Assigned branch was not found.' })
+    res.json({ branch: branches[0] })
+  })
+})
+
+app.get('/api/branches', authenticateToken, authorizeRoles('super_admin'), (req, res) => {
   const { search, status } = req.query
   const filters = []
   const params = []
@@ -657,7 +713,7 @@ app.get('/api/branches', authenticateToken, authorizeRoles('super_admin', 'admin
   })
 })
 
-app.post('/api/branches', authenticateToken, authorizeRoles('super_admin', 'admin_hr'), (req, res) => {
+app.post('/api/branches', authenticateToken, authorizeRoles('super_admin'), (req, res) => {
   const branch = validateBranchInput(req.body)
 
   if (branch.error) {
@@ -696,7 +752,7 @@ app.post('/api/branches', authenticateToken, authorizeRoles('super_admin', 'admi
   })
 })
 
-app.put('/api/branches/:id', authenticateToken, authorizeRoles('super_admin', 'admin_hr'), (req, res) => {
+app.put('/api/branches/:id', authenticateToken, authorizeRoles('super_admin'), (req, res) => {
   const { id } = req.params
   const branch = validateBranchInput(req.body)
 
@@ -745,7 +801,7 @@ app.put('/api/branches/:id', authenticateToken, authorizeRoles('super_admin', 'a
   })
 })
 
-app.patch('/api/branches/:id/status', authenticateToken, authorizeRoles('super_admin', 'admin_hr'), (req, res) => {
+app.patch('/api/branches/:id/status', authenticateToken, authorizeRoles('super_admin'), (req, res) => {
   const { id } = req.params
   const { status } = req.body
 
@@ -929,15 +985,14 @@ app.get('/api/inventory', authenticateToken, authorizeRoles('super_admin', 'admi
 
 app.get('/api/inventory/:id', authenticateToken, authorizeRoles('super_admin', 'admin_hr', 'branch_staff'), (req, res, next) => {
   if (!isPositiveInteger(req.params.id)) return next()
+  const scopedBranchId = req.user.role === 'super_admin' ? null : getAuthorizedBranchId(req, req.user.branch_id)
+  if (scopedBranchId?.error) return res.status(403).json({ message: scopedBranchId.error })
   const sql = `SELECT i.*, b.branch_name, p.name AS product_name, p.category, p.price
     FROM inventory i INNER JOIN branches b ON b.id = i.branch_id
-    INNER JOIN products p ON p.id = i.product_id WHERE i.id = ? LIMIT 1`
-  db.query(sql, [req.params.id], (error, records) => {
+    INNER JOIN products p ON p.id = i.product_id WHERE i.id = ? ${scopedBranchId ? 'AND i.branch_id = ?' : ''} LIMIT 1`
+  db.query(sql, scopedBranchId ? [req.params.id, scopedBranchId] : [req.params.id], (error, records) => {
     if (error) return res.status(500).json({ message: 'Database error while loading inventory.' })
     if (!records.length) return res.status(404).json({ message: 'Inventory record not found.' })
-    if (req.user.role === 'branch_staff' && Number(records[0].branch_id) !== Number(req.user.branch_id)) {
-      return res.status(403).json({ message: 'You can access your assigned branch only.' })
-    }
     res.json({ inventory: records[0] })
   })
 })
@@ -946,12 +1001,11 @@ app.patch('/api/inventory/:id/threshold', authenticateToken, authorizeRoles('sup
   if (!isPositiveInteger(req.params.id) || !isNonNegativeInteger(req.body.low_stock_threshold)) {
     return res.status(400).json({ message: 'Inventory ID and a non-negative low-stock threshold are required.' })
   }
-  db.query('SELECT branch_id FROM inventory WHERE id = ? LIMIT 1', [req.params.id], (findError, records) => {
+  const scopedBranchId = req.user.role === 'super_admin' ? null : getAuthorizedBranchId(req, req.user.branch_id)
+  if (scopedBranchId?.error) return res.status(403).json({ message: scopedBranchId.error })
+  db.query(`SELECT branch_id FROM inventory WHERE id = ? ${scopedBranchId ? 'AND branch_id = ?' : ''} LIMIT 1`, scopedBranchId ? [req.params.id, scopedBranchId] : [req.params.id], (findError, records) => {
     if (findError) return res.status(500).json({ message: 'Database error while loading inventory.' })
     if (!records.length) return res.status(404).json({ message: 'Inventory record not found.' })
-    if (req.user.role === 'branch_staff' && Number(records[0].branch_id) !== Number(req.user.branch_id)) {
-      return res.status(403).json({ message: 'You can update your assigned branch only.' })
-    }
     db.query('UPDATE inventory SET low_stock_threshold = ? WHERE id = ?', [Number(req.body.low_stock_threshold), req.params.id], (error) => {
       if (error) return res.status(500).json({ message: 'Database error while updating threshold.' })
       res.json({ message: 'Low-stock threshold updated successfully.' })
@@ -1063,14 +1117,15 @@ app.get('/api/transactions', authenticateToken, authorizeRoles('super_admin', 'a
 
 app.get('/api/transactions/:id', authenticateToken, authorizeRoles('super_admin', 'admin_hr', 'branch_staff'), (req, res) => {
   if (!isPositiveInteger(req.params.id)) return res.status(400).json({ message: 'Invalid transaction ID.' })
+  const scopedBranchId = req.user.role === 'super_admin' ? null : getAuthorizedBranchId(req, req.user.branch_id)
+  if (scopedBranchId?.error) return res.status(403).json({ message: scopedBranchId.error })
   const headerSql = `SELECT t.*, b.branch_name, b.branch_code, u.full_name AS performed_by_name
     FROM merchandising_transactions t INNER JOIN branches b ON b.id = t.branch_id INNER JOIN users u ON u.id = t.performed_by
-    WHERE t.id = ? LIMIT 1`
-  db.query(headerSql, [req.params.id], (error, records) => {
+    WHERE t.id = ? ${scopedBranchId ? 'AND t.branch_id = ?' : ''} LIMIT 1`
+  db.query(headerSql, scopedBranchId ? [req.params.id, scopedBranchId] : [req.params.id], (error, records) => {
     if (error) return res.status(500).json({ message: 'Database error while loading transaction.' })
     if (!records.length) return res.status(404).json({ message: 'Transaction not found.' })
     const transaction = records[0]
-    if (req.user.role === 'branch_staff' && Number(transaction.branch_id) !== Number(req.user.branch_id)) return res.status(403).json({ message: 'You can access your assigned branch only.' })
     db.query(`SELECT ti.*, p.name AS product_name, p.category FROM merchandising_transaction_items ti INNER JOIN products p ON p.id = ti.product_id WHERE ti.transaction_id = ?`, [transaction.id], (itemsError, items) => {
       if (itemsError) return res.status(500).json({ message: 'Database error while loading transaction items.' })
       res.json({ transaction: { ...transaction, items } })
@@ -1165,15 +1220,19 @@ app.post('/api/transactions', authenticateToken, authorizeRoles('super_admin', '
 })
 
 app.get('/api/dashboard/summary', authenticateToken, authorizeRoles('super_admin', 'admin_hr', 'branch_staff'), (req, res) => {
-  const scopedBranchId = req.user.role === 'branch_staff' ? getAuthorizedBranchId(req, req.user.branch_id) : null
+  const scopedBranchId = req.user.role === 'super_admin' ? null : getAuthorizedBranchId(req, req.user.branch_id)
   if (scopedBranchId?.error) return res.status(403).json({ message: scopedBranchId.error })
   const inventoryWhere = scopedBranchId ? 'WHERE branch_id = ?' : ''
   const inventoryParams = scopedBranchId ? [scopedBranchId] : []
   const transactionWhere = scopedBranchId ? 'AND branch_id = ?' : ''
   const transactionParams = scopedBranchId ? [scopedBranchId] : []
-  db.query('SELECT COUNT(*) AS total_branches, SUM(status = \'active\') AS active_branches FROM branches', (branchError, branchRows) => {
+  const branchSummarySql = `SELECT COUNT(*) AS total_branches, SUM(status = 'active') AS active_branches FROM branches ${scopedBranchId ? 'WHERE id = ?' : ''}`
+  db.query(branchSummarySql, scopedBranchId ? [scopedBranchId] : [], (branchError, branchRows) => {
     if (branchError) return res.status(500).json({ message: 'Database error while loading dashboard.' })
-    db.query('SELECT COUNT(*) AS total_active_products FROM products WHERE status = \'active\'', (productError, productRows) => {
+    const productSummarySql = scopedBranchId
+      ? 'SELECT COUNT(DISTINCT product_id) AS total_active_products FROM inventory INNER JOIN products ON products.id = inventory.product_id WHERE inventory.branch_id = ? AND products.status = \'active\''
+      : 'SELECT COUNT(*) AS total_active_products FROM products WHERE status = \'active\''
+    db.query(productSummarySql, scopedBranchId ? [scopedBranchId] : [], (productError, productRows) => {
       if (productError) return res.status(500).json({ message: 'Database error while loading dashboard.' })
       db.query(`SELECT COALESCE(SUM(quantity), 0) AS total_inventory_units, SUM(quantity > low_stock_threshold) AS in_stock_items, SUM(quantity > 0 AND quantity <= low_stock_threshold) AS low_stock_items, SUM(quantity = 0) AS out_of_stock_items FROM inventory ${inventoryWhere}`, inventoryParams, (inventoryError, inventoryRows) => {
         if (inventoryError) return res.status(500).json({ message: 'Database error while loading dashboard.' })
@@ -1187,7 +1246,7 @@ app.get('/api/dashboard/summary', authenticateToken, authorizeRoles('super_admin
 })
 
 app.get('/api/dashboard/branches', authenticateToken, authorizeRoles('super_admin', 'admin_hr', 'branch_staff'), (req, res) => {
-  const scopedBranchId = req.user.role === 'branch_staff' ? getAuthorizedBranchId(req, req.user.branch_id) : null
+  const scopedBranchId = req.user.role === 'super_admin' ? null : getAuthorizedBranchId(req, req.user.branch_id)
   if (scopedBranchId?.error) return res.status(403).json({ message: scopedBranchId.error })
   const sql = `SELECT b.id, b.branch_name, b.branch_code, b.status, COUNT(i.id) AS inventory_records,
     COALESCE(SUM(i.quantity), 0) AS total_units, SUM(i.quantity > 0 AND i.quantity <= i.low_stock_threshold) AS low_stock_count, SUM(i.quantity = 0) AS out_of_stock_count,
@@ -1201,7 +1260,7 @@ app.get('/api/dashboard/branches', authenticateToken, authorizeRoles('super_admi
 })
 
 app.get('/api/dashboard/activity', authenticateToken, authorizeRoles('super_admin', 'admin_hr', 'branch_staff'), (req, res) => {
-  const branchId = req.user.role === 'branch_staff' ? getAuthorizedBranchId(req, req.user.branch_id) : null
+  const branchId = req.user.role === 'super_admin' ? null : getAuthorizedBranchId(req, req.user.branch_id)
   if (branchId?.error) return res.status(403).json({ message: branchId.error })
   const movementSql = `SELECT m.id, m.created_at, m.movement_type, m.quantity, m.reference_number, b.branch_name, p.name AS product_name, u.full_name AS performed_by_name
     FROM inventory_movements m INNER JOIN branches b ON b.id = m.branch_id INNER JOIN products p ON p.id = m.product_id INNER JOIN users u ON u.id = m.performed_by

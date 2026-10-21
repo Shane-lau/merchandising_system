@@ -6,6 +6,7 @@ import Branches from './pages/Branches'
 import Dashboard from './pages/Dashboard'
 import Inventory from './pages/Inventory'
 import Login from './pages/Login'
+import MyBranch from './pages/MyBranch'
 import Products from './pages/Products'
 import Register from './pages/Register'
 import RoleTestPage from './pages/RoleTestPage'
@@ -33,14 +34,19 @@ function App() {
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={['super_admin', 'admin_hr']} />}>
-            <Route path="/branches" element={<Branches />} />
+            <Route path="/employees" element={<Users />} />
             <Route
               path="/admin-test"
               element={<RoleTestPage title="Admin / HR Test" endpoint="/api/admin-test" />}
             />
           </Route>
 
+          <Route element={<ProtectedRoute allowedRoles={['admin_hr', 'branch_staff']} />}>
+            <Route path="/my-branch" element={<MyBranch />} />
+          </Route>
+
           <Route element={<ProtectedRoute allowedRoles={['super_admin']} />}>
+            <Route path="/branches" element={<Branches />} />
             <Route path="/users" element={<Users />} />
             <Route
               path="/super-admin-test"

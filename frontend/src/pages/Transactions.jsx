@@ -5,7 +5,7 @@ import { useAuth } from '../context/useAuth'
 
 function Transactions() {
   const { user } = useAuth()
-  const canChooseBranch = user.role !== 'branch_staff'
+  const canChooseBranch = user.role === 'super_admin'
   const [branches, setBranches] = useState([])
   const [products, setProducts] = useState([])
   const [transactions, setTransactions] = useState([])
