@@ -91,6 +91,143 @@
   text-decoration: none;
 }
 
+.page-alert {
+  margin-top: 20px;
+}
+
+.header-actions,
+.segmented-control {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.segmented-control {
+  margin-bottom: 16px;
+}
+
+.segmented-control button {
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  color: var(--text-strong);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  padding: 9px 12px;
+}
+
+.segmented-control button.active {
+  background: var(--text-strong);
+  color: #fff;
+}
+
+.status-badge.in_stock,
+.status-badge.completed {
+  background: #f1f8f0;
+  color: #235c24;
+}
+
+.status-badge.low_stock {
+  background: #fff4df;
+  color: #805400;
+}
+
+.status-badge.out_of_stock,
+.status-badge.voided {
+  background: #fff1f0;
+  color: #8a1f15;
+}
+
+.metric-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  margin-top: 24px;
+}
+
+.metric-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: grid;
+  gap: 8px;
+  min-height: 88px;
+  padding: 16px;
+}
+
+.metric-card span,
+.activity-row span,
+.activity-row small {
+  color: var(--muted);
+}
+
+.metric-card strong {
+  color: var(--text-strong);
+  font-size: 22px;
+}
+
+.activity-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.activity-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.activity-row {
+  border-bottom: 1px solid var(--border);
+  display: grid;
+  gap: 3px;
+  padding-bottom: 10px;
+}
+
+.transaction-items {
+  display: grid;
+  gap: 10px;
+}
+
+.transaction-item {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(130px, 1fr) 75px 110px auto;
+}
+
+.transaction-item select,
+.transaction-item input {
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-strong);
+  font: inherit;
+  min-width: 0;
+  padding: 9px;
+}
+
+.transaction-item button {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font: inherit;
+  padding: 8px;
+}
+
+.transaction-total {
+  align-items: center;
+  border-top: 1px solid var(--border);
+  color: var(--text-strong);
+  display: flex;
+  font-size: 18px;
+  justify-content: space-between;
+  padding-top: 14px;
+}
+
 .primary-button,
 .secondary-button,
 .module-card,
@@ -384,5 +521,13 @@ th {
   .filters {
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .activity-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .transaction-item {
+    grid-template-columns: 1fr 80px;
   }
 }

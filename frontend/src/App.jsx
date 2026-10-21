@@ -4,10 +4,12 @@ import ProtectedRoute from './components/ProtectedRoute'
 import { AuthProvider } from './context/AuthContext'
 import Branches from './pages/Branches'
 import Dashboard from './pages/Dashboard'
+import Inventory from './pages/Inventory'
 import Login from './pages/Login'
 import Products from './pages/Products'
 import Register from './pages/Register'
 import RoleTestPage from './pages/RoleTestPage'
+import Transactions from './pages/Transactions'
 import Users from './pages/Users'
 
 function App() {
@@ -22,6 +24,8 @@ function App() {
           <Route element={<ProtectedRoute />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/products" element={<Products />} />
+            <Route path="/inventory" element={<Inventory />} />
+            <Route path="/transactions" element={<Transactions />} />
             <Route
               path="/staff-test"
               element={<RoleTestPage title="Staff Test" endpoint="/api/staff-test" />}
